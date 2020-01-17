@@ -10,14 +10,27 @@
 #   Trains a SpaceInvaders agent using default hyperparameters.
 ################################################################
 
-from ppo.model import FCNetwork, PolicyNetwork, ValueNetwork
-from ppo.datasets import ExperienceDataset
+import torch
+from torch import nn, optim
+from torch.utils.data import DataLoader
+from matplotlib import pyplot as plt
+import numpy as np
+from tqdm import tqdm
+from itertools import chain
+import os
+import gym
+from threading import Thread
+
+# Local Imports
+from .model import FCNetwork, PolicyNetwork, ValueNetwork
+from .datasets import ExperienceDataset
+from .utils import save_checkpoint, generate_rollouts
 
 def train(env_name, 
-         policy_net,
-         value_net,
-         feature_net=None,
-         device='cpu', 
+         state_space_dim,
+         action_space_dim,
+         feature_net=None, # 'fc' or 'conv'
+         feature_dim=None,
          epochs=50, 
          episodes_per_epoch=100, 
          episode_length=200, 
@@ -28,7 +41,31 @@ def train(env_name,
          environment_threads=8,
          pad_img=False,
          resume=None):
-            
+
+
+    torch.cuda.empty_cache()
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
+
+    if resume:
+        resume = os.path.join("saved_models", "{}_best.pth.tar".format(env_name))
+    
+    if feature_net is None:
+        policy_net = PolicyNetwork(state_space_dim, action_space_dim, hidden_dim=100)
+        value_net = ValueNetwork(state_space_dim, hidden_dim=100)
+    elif feature_net == 'fc':
+        feature_net = FCNetwork(state_space_dim, feature_dim)
+        policy_net = PolicyNetwork(feature_dim, action_space_dim, hidden_dim=100)
+        value_net = ValueNetwork(feature_dim, hidden_dim=100)
+    else:
+        # TODO: support this
+        feature_net = ConvNetwork(state_space_dim, feature_dim)
+        policy_net = PolicyNetwork(feature_dim, action_space_dim, hidden_dim=100)
+        value_net = ValueNetwork(feature_dim, hidden_dim=100)
+
     value_criterion = nn.MSELoss()
 
     optimizer = optim.Adam(chain(policy_net.parameters(), value_net.parameters()), 
@@ -47,6 +84,7 @@ def train(env_name,
         
     # optionally resume from a checkpoint
     if resume:
+        print(resume)
         if os.path.isfile(resume):
             print("=> loading checkpoint '{}'".format(resume))
             checkpoint = torch.load(resume)
@@ -56,6 +94,8 @@ def train(env_name,
             start_epoch = checkpoint['epoch']
             value_net.load_state_dict(checkpoint['value_state_dict'])
             policy_net.load_state_dict(checkpoint['policy_state_dict'])
+            if feature_net:
+                feature_net.load_state_dict(checkpoint['feature_state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(resume, checkpoint['epoch']))
         else:
@@ -117,7 +157,7 @@ def train(env_name,
                     val_loss = value_criterion(estimated_returns, discounted_return)
                     value_losses.append(val_loss.item())
 
-                    # Compute the ratio of the current value of the action to the former value of the action
+                    # Compute the ratio of the current value of the action versus the former value of the action
                     new_action_dist = policy_net(state)
                     new_action_probs = new_action_dist[range(new_action_dist.shape[0]), old_action.long()[:, 0]].unsqueeze(1)
                     old_action_probs = old_action_dist[range(old_action_dist.shape[0]), old_action.long()[:, 0]].unsqueeze(1)
@@ -144,18 +184,31 @@ def train(env_name,
     except KeyboardInterrupt:
         pass
     finally:
-        # Save the model
-        print("\nSaving model...")
-        save_checkpoint( { 
-                    'epoch' : e + 1,
-                    'value_losses' : value_losses,
-                    'policy_losses' : policy_losses,
-                    'avg_rewards' : avg_rewards,
-                    'value_state_dict' : value_net.state_dict(),
-                    'policy_state_dict' : policy_net.state_dict(),
-                         }, is_best=True, env_name=env_name )
-        print("Model saved.")
-        
+        if feature_net is not None:
+            # Save the model
+            print("\nSaving model...")
+            save_checkpoint( { 
+                        'epoch' : e + 1,
+                        'value_losses' : value_losses,
+                        'policy_losses' : policy_losses,
+                        'avg_rewards' : avg_rewards,
+                        'feature_state_dict': feature_net.state_dict(),
+                        'value_state_dict' : value_net.state_dict(),
+                        'policy_state_dict' : policy_net.state_dict(),
+                            }, is_best=True, env_name=env_name )
+            print("Model saved.")
+        else:
+            # Save the model
+            print("\nSaving model...")
+            save_checkpoint( { 
+                        'epoch' : e + 1,
+                        'value_losses' : value_losses,
+                        'policy_losses' : policy_losses,
+                        'avg_rewards' : avg_rewards,
+                        'value_state_dict' : value_net.state_dict(),
+                        'policy_state_dict' : policy_net.state_dict(),
+                            }, is_best=True, env_name=env_name )
+            print("Model saved.")
         # Cleanup tqdm, plot rewards
         loop.close()
         plt.plot(np.arange(len(avg_rewards)), avg_rewards)
@@ -164,30 +217,18 @@ def train(env_name,
         plt.ylabel("Reward")
         plt.show()
 
-def train_spaceinvaders_ram():
+def train_spaceinvaders_ram(resume=True):
     """Trains a Space Invaders agent using default hyperparameters."""
 
-    torch.cuda.empty_cache()
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda:0')
-    else:
-        device = torch.device('cpu')
-        
-    env = 'SpaceInvaders-ram-v0'
-    
     state_space_dim = 128
     action_space_dim = 6
-    feature_dim = 100
-    
-    policy_net = PolicyNetwork(feature_dim, action_space_dim, hidden_dim=100)
-    value_net = ValueNetwork(feature_dim, hidden_dim=100)
-    feature_net = FCNetwork(state_space_dim, feature_dim)
-    main(env, 
-         policy_net, 
-         value_net, 
-         feature_net=feature_net,
-         device=device, 
+    env_name = 'SpaceInvaders-ram-v0'
+
+    train(env_name,
+         state_space_dim,
+         action_space_dim,
+         feature_net='fc',
+         feature_dim=100,
          epochs=400, 
          episodes_per_epoch=30, 
          episode_length=1000, 
@@ -195,22 +236,28 @@ def train_spaceinvaders_ram():
          policy_epochs=5, 
          batch_size=256, 
          epsilon=0.2, 
-         pad_img=False)
-         resume="{}.pth.tar".format(env))
+         pad_img=False,
+         resume=resume)
     
-def train_cartpole():
+def train_cartpole(resume=True):
     """Trains a CartPole agent using default hyperparameters."""
     
     state_space_dim = 4
     action_space_dim = 2
-    epochs = 30
-    env = 'CartPole-v0'
-    if torch.cuda.is_available():
-        device = torch.device('cuda:0')
-    else:
-        device = torch.device('cpu')
+    env_name = 'CartPole-v0'
     
-    policy_net = PolicyNetwork(state_space_dim, action_space_dim)
-    value_net = ValueNetwork(state_space_dim)
-    
-    train(env, policy_net, value_net, device=device, epochs=epochs)
+    train(env_name, 
+         state_space_dim,
+         action_space_dim,
+         feature_net=None,
+         feature_dim=None,
+         epochs=30,
+         episodes_per_epoch=100, 
+         episode_length=200, 
+         gamma=0.99, 
+         policy_epochs=5, 
+         batch_size=256, 
+         epsilon=0.2,
+         environment_threads=8,
+         pad_img=False,
+         resume=resume)

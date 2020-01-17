@@ -1,5 +1,3 @@
-
-
 ################################################################
 # datasets.py - dataset classes for Atari environments
 # 
@@ -7,6 +5,8 @@
 #   Dataset holding experience in the form of (state, action_distribuion,
 #   action, reward, discounted_reward) tuples
 ################################################################
+
+from torch.utils.data import Dataset
 
 class ExperienceDataset(Dataset):
     """Dataset holding experience in the form of (state, action_distribuion,

@@ -1,7 +1,6 @@
-
 ################################################################
-# utils.py - utility functions for PPO algorithm and Atari 
-#   environments
+# utils.py - utility functions for PPO algorithm, training, and 
+#   Atari environments
 # 
 # calc_true_returns()
 #   Calculates the discounted sum of rewards at each state and 
@@ -13,6 +12,16 @@
 # save_checkpoint()
 #    Saves a checkpoint of the current model parameters
 ################################################################
+
+import torch
+import gym
+import shutil
+import numpy as np
+from threading import Lock
+from PIL import Image
+
+# Local imports
+from .model import FCNetwork, PolicyNetwork
 
 def calc_true_returns(rollouts, gamma):
     """Calculates the discounted sum of rewards at each state and updates rollouts.
@@ -89,9 +98,11 @@ def pad_image(img):
     return padded_img
 
 def save_checkpoint(state, is_best, env_name):
-    torch.save(state, env_name + '.pth.tar')
+    ckpt_file = os.path.join("saved_models", "{}.pth.tar".format(env))
+    best_ckpt_file = os.path.join("saved_models", "{}_best.pth.tar".format(env))
+    torch.save(state, ckpt_file)
     if is_best:
-        shutil.copyfile(env_name + '.pth.tar', env_name + '_best.pth.tar')
+        shutil.copyfile(ckpt_file, best_ckpt_file)
 
 def save_demo(env, policy_net, episode_length, device, pad_img, feature_net, filename):
     """Runs an agent through an environment, saves the simulation as a gif"""
@@ -116,26 +127,36 @@ def save_demo(env, policy_net, episode_length, device, pad_img, feature_net, fil
             break
         state = next_state
     
-    env_images[0].save('sample_data/space_invaders.gif',
-                save_all=True, append_images=env_images[1:], optimize=False, duration=40, loop=0)
+    frames[0].save('results/space_invaders.gif',
+                save_all=True, append_images=frames[1:], optimize=False, duration=40, loop=0)
 
 def save_spaceinvaders_demo():
     
+    state_space_dim = 128
+    action_space_dim = 6
+    feature_dim = 100
+    env_name = 'SpaceInvaders-ram-v0'
+    episode_length = 1000
+
     if torch.cuda.is_available():
         device = torch.device('cuda:0')
     else:
         device = torch.device('cpu')
 
-    env = gym.make('SpaceInvaders-ram-v0')
+    env = gym.make(env_name)
     policy_net = PolicyNetwork(feature_dim, action_space_dim, hidden_dim=100)
     feature_net = FCNetwork(state_space_dim, feature_dim)
 
     # Load saved model
-    resume = 'SpaceInvaders-ram-v0_best.pth.tar'
+    resume = 'SpaceInvaders-ram-v0_best.pth'
     print("=> loading checkpoint '{}'".format(resume))
     checkpoint = torch.load(resume)
     policy_net.load_state_dict(checkpoint['policy_state_dict'])
     feature_net.load_state_dict(checkpoint['feature_state_dict'])
     print("=> loaded checkpoint")
 
-    save_demo(env, policy_net, episode_length=1000, device=device, pad_img=False, feature_net=feature_net, filename='results/space_invaders_ppo.gif')
+    save_demo(env, policy_net, episode_length=episode_length, device=device, pad_img=False, feature_net=feature_net, filename='results/space_invaders_ppo.gif')
+
+def save_cartpole_demo():
+    # TODO: implement this
+    pass

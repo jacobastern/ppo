@@ -14,6 +14,8 @@
 #   based on the current state
 ################################################################
 
+from torch import nn
+
 class ConvNetwork(nn.Module):
     """Network to extract features from images, as a precursor to the Policy and
     Value Networks"""

@@ -148,9 +148,9 @@ def save_spaceinvaders_demo():
     feature_net = FCNetwork(state_space_dim, feature_dim)
 
     # Load saved model
-    resume = 'SpaceInvaders-ram-v0_best.pth'
+    resume = 'saved_models/SpaceInvaders-ram-v0_best.pth'
     print("=> loading checkpoint '{}'".format(resume))
-    checkpoint = torch.load(resume)
+    checkpoint = torch.load(resume, map_location=device)
     policy_net.load_state_dict(checkpoint['policy_state_dict'])
     feature_net.load_state_dict(checkpoint['feature_state_dict'])
     print("=> loaded checkpoint")
